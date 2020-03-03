@@ -4,13 +4,17 @@ We are starting with a completely fresh installation of pintos.
 
 All work done for this assignment will be in the `pintos/src/userprog` directory.
 
+## Our Implementation...
+
+TODO
+
 Project Summary
 ---
 Project 2 is about running programs in user space. These programs will be known as user programs and will not directly access the kernel, but will do so through system OS calls.
 
 pintos has provided us a file system in `file.h` and `filesys.h`.
 
-The following command can be used to run the `echo` program with temporary file partiong of size **n** megabytes just for the duration of pintos' run:
+The following command can be used to run the `echo` program with temporary file partitioning of size **n** megabytes just for the duration of pintos' run:
 ```bash
 pintos --filesys-size=2 -p ../../examples/echo -a echo -- -f -q run 'echo x'
 ```
@@ -23,10 +27,6 @@ pintos -q rm file
 `src/examples/*` Contains example user programs. The makefile only compiles the provided example programs.
 
 User programs will have access to virtual memory space that we will map to phyiscal memory.
-
-## Our Implementation...
-
-TODO
 
 ### Virtual Memory in Pintos
 user memory ranges from 0 to *PHYS_BASE*, defined in `threads/vaddr.h` default is 3 GB. Kernel memory is in the rest of the virtual address space, up to 4 GB.
@@ -75,7 +75,7 @@ put_user (uint8_t *udst, uint8_t byte) {
 }
 ```
 
-The above code works assuming that the user address has already been verified to be below the PHYS_BASE AND that you've modified `page_fault()` so that a page fault in the kernel sets eax to 0xffffffff and copies the former value of eax into eip.
+The above code works assuming that the user address has already been verified to be below the PHYS_BASE AND that you've modified `page_fault()` so that a page fault in the kernel sets `eax` to `0xffffffff`, copying the former value of eax into `eip`.
 
 ### Useful Documentation
   1. [Stanford Project 2 Reference](https://web.stanford.edu/class/cs140/projects/pintos/pintos_3.html#SEC32)
