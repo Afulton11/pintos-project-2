@@ -11,12 +11,12 @@ Project 2 is about running programs in user space. These programs will be known 
 pintos has provided us a file system in `file.h` and `filesys.h`.
 
 The following command can be used to run the `echo` program with temporary file partiong of size **n** megabytes just for the duration of pintos' run:
-```
+```bash
 pintos --filesys-size=2 -p ../../examples/echo -a echo -- -f -q run 'echo x'
 ```
 
 A pintos file can be removed using *rm*:
-```
+```bash
 pintos -q rm file
 ```
 
@@ -44,7 +44,7 @@ The kernel often accesses memory through pointers provided by a user programn. T
   * not *NULL*
   * not a pointer to unmapped VA space
   * not a pointer to kernel VA space (i.e. above PHYS_BASE)
-  * 
+
 otherwise, the pointer is invalid. Invalid pointers should be rejected without harming the running process or kernel. This rejection can be done by terminating the process and freeing its resources.
 
 2 ways to interpret VA pointers:
@@ -52,7 +52,7 @@ otherwise, the pointer is invalid. Invalid pointers should be rejected without h
   2. Check the user pointer points to space below PHYS_BASE, then derefernce it. The invalid pointer will cause a pauge_fault() in `userprog/exception.c` and is generally faster, taking advantage of the processor's MMU.
 
 In both cases, make sure not to leak resources by making sure to release locks or free pages of memory after encountering an invalid user pointer. This is more difficult to handle if the invalid pointer causes a page fault. Therefore if you choose the second option here's helpful code for handling it:
-```
+```C
 /* Reads a byte at user virtual address UADDR.
    UADDR must be below PHYS_BASE.
    Returns the byte value if successful, -1 if a segfault occurred. */
