@@ -60,7 +60,8 @@ static int
 get_user (const uint8_t *uaddr) {
   int result;
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
-       : "=&a" (result) : "m" (*uaddr)); return result;
+       : "=&a" (result) : "m" (*uaddr));
+  return result;
 }
 /* Writes BYTE to user address UDST.
    UDST must be below PHYS_BASE.
@@ -69,7 +70,8 @@ static bool
 put_user (uint8_t *udst, uint8_t byte) {
   int error_code;
   asm ("movl $1f, %0; movb %b2, %1; 1:"
-       : "=&a" (error_code), "=m" (*udst): "q" (byte)); return error_code != -1;
+       : "=&a" (error_code), "=m" (*udst): "q" (byte)); 
+  return error_code != -1;
 }
 ```
 
