@@ -35,13 +35,25 @@ Austin Smith
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
+	
+
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
 
+	https://stackoverflow.com/questions/22210546/whats-the-difference-between-strtok-and-strtok-r-in-c
+	strtok_r allows for storing state between calls. this state can
+		be used to call the same function again using even a different
+		thread. the _r stands for reentrant. strtok often uses a global 
+		variable to keep track of state.
+
 >> A4: In Pintos, the kernel separates commands into an executable name
 >> and arguments.  In Unix-like systems, the shell does this
 >> separation.  Identify at least two advantages of the Unix approach.
+
+	1. Modularity. The shell can easily change how commands are separted into executables and arguments
+	2. 
+
 
 			     SYSTEM CALLS
 			     ============
