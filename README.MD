@@ -4,12 +4,75 @@ We are starting with a completely fresh installation of pintos.
 
 All work done for this assignment will be in the `pintos/src/userprog` directory.
 
-## Our Implementation...
+# Implementing
 
-TODO
+Terminating: 
+```c
+if (is_user_process && !did_halt)
+  printf ("%s: exit(%d)\n", name, pid);
+```
+### 1. Argument Passing
 
-Project Summary
----
+`process_execute()` should support passing arguments to new processes. The input
+should be divided into words at spaces, multiple spaces in a row are still 1 space.
+
+First word = program name
+After first...
+ith word = ith argument
+
+Impose a limit on arguments i.e. < 4KB
+
+use `strtok_r()` for tokenization
+
+### 2. User Memory Access
+See Accessing User Memory in Project Summary below.
+
+### 3. Read System Calls From User Stack
+See section 3.3.4 System Calls.
+
+`userprog/syscall.c` should retrieve the system call number & system call arguments.
+Then perform the actions.
+
+We need ways to read & write data in user VA space to even obtain the sytem call number.
+Here is where we check for a valid pointer from the user proc
+
+System calls need to be synchronized so multiple user processes can make them at once.
+File system code should be treated as critical section code, but don't modify filesys code.
+
+user-level functions are provided for each system call in `lib/user/syscall.c` User processes use these to invoke each system call.
+
+A user program shouldn't cause the OS to crash.
+
+### 4. Exit System Call
+Terminates the current user program, returning the *status* to the kernel. A status of 0 indicates success, nonzero indicates an error.
+
+### 5. Write System Call
+`write(int fileDescriptor, const void *buffer, unsigned size)`
+Writes size bytes from buffer to open the fileDescriptor. Returning the number of bytes that were actually written, which is possibly less than size if some bytes could not be written.
+
+### 6. Provide correct Impl For `process_wait()`
+
+For the `wait()` system call:
+  This should wait for a child process pid and retrieves the child's exit status. If pid still alive wait till the child terminates, then retunr the pid passed to exit. If pid was killed by the kernel, wait(pid) should return -1.
+
+  wait should fail, returning -1 if:
+    1. pid doesn't refer to a direct child of the calling process.
+        * pid is only a direct child of the calling process when the calling processing received pid as a return value from a successful call to `exec`.
+        * Children cannot be inherited.
+    2. If a process calls wait on a pid that its already waiting on. The process can only wait for the same child once.
+
+  Its important to realize that a process could exit before it's children, We need to account for this. All a proccess' resources should be freed regardless of if its parent is waiting for it or not.
+
+The suggested temporary implementation of `process_wait` will be implemented first, then a more robust one once we get to it.
+
+### 7. Denying Writes to Executables
+
+Writes to files that are executables should be denied using `file_deny_write()` to prevent writes to an open file. `file_allow_writes()` reenables writes. 
+
+The executable should be kept open as long as the process is running.
+
+# Project Summary
+
 Project 2 is about running programs in user space. These programs will be known as user programs and will not directly access the kernel, but will do so through system OS calls.
 
 pintos has provided us a file system in `file.h` and `filesys.h`.
