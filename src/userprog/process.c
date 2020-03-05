@@ -20,46 +20,87 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void push_arguments (void **esp, const char*[], const int arg_count);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *cmd_line)
 {
-  char *fn_copy;
+  char *file_name = NULL, *save_ptr = NULL;
+  char *cmd_line_copy = NULL;
+  struct process_control_block *pcb = NULL;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  cmd_line_copy = palloc_get_page(0);
+  file_name = palloc_get_page(0);
+  pcb = palloc_get_page(0);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  if (cmd_line_copy != NULL
+    && file_name != NULL
+    && pcb != NULL) {
+
+    /* Make a copy of the line.
+       Otherwise there's a race between the caller and load(). */
+    strlcpy(cmd_line_copy, cmd_line, PGSIZE);
+    /* Place file_name into thread's memory. */
+    strlcpy(file_name, cmd_line_copy, PGSIZE);
+    file_name = strtok_r(cmd_line_copy, " ", &save_ptr);
+
+    pcb->pid = PID_INIT;
+    pcb->cmd_line = cmd_line_copy;
+
+    /* Create a new thread to execute FILE_NAME. */
+    tid = thread_create (file_name, PRI_DEFAULT, start_process, pcb);
+  } else {
+    tid = TID_ERROR;
+  }
+
+  if (tid == TID_ERROR) {
+    palloc_free_page (cmd_line_copy); 
+    palloc_free_page (file_name); 
+    palloc_free_page (pcb); 
+  }
+
   return tid;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *pcb_pointer)
 {
-  char *file_name = file_name_;
-  struct intr_frame if_;
-  bool success;
+  struct thread *t = thread_current();
+  struct process_control_block *pcb = pcb_pointer;
 
-  /* Initialize interrupt frame and load executable. */
-  memset (&if_, 0, sizeof if_);
-  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-  if_.cs = SEL_UCSEG;
-  if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  char *file_name = (char*) pcb->cmd_line;
+  struct intr_frame if_;
+  bool success = false;
+
+  const char **arguments = (const char**) palloc_get_page(0);
+  if (arguments != NULL) {
+
+    char* save_ptr = NULL;
+    int arg_count = 0;
+    for (
+      char* token = strtok_r(file_name, " ", &save_ptr); 
+      token != NULL;
+      token = strtok_r(NULL, " ", &save_ptr)) {
+        arguments[arg_count++] = token;
+    }
+
+    /* Initialize interrupt frame and load executable. */
+    memset (&if_, 0, sizeof if_);
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+    success = load (file_name, &if_.eip, &if_.esp);
+    if (success) {
+      push_arguments(&if_.esp, arguments, arg_count);
+    }
+  }
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -88,6 +129,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while (true) {}
   return -1;
 }
 
@@ -442,6 +484,49 @@ setup_stack (void **esp)
         palloc_free_page (kpage);
     }
   return success;
+}
+
+static void 
+push_arguments (void **esp, const char* arguments[], const int arg_count)
+{
+  ASSERT(arg_count > -1);
+  // see section 3.5.1 for how arguments are laid out for a starting a program.
+
+  void *argv_addr[arg_count];
+
+  for (int i = 0; i < arg_count; i++) {
+    int len = strlen(arguments[i]) + 1;
+    // move the esp to the next empty argument position
+    *esp -= len;
+    // copy argument at i into the current location of the stack pointer.
+    memcpy(*esp, arguments[i], len);
+    argv_addr[i] = *esp;
+  }
+
+  // word-align to go to the next "block" of instructions.
+  *esp = (void*)((unsigned int)(*esp) & 0xfffffffc);
+
+  // set our very last argument (arg_count + 1) to null, it doesnt exist anyways.
+  *esp -= sizeof(NULL);
+  *((uint32_t*) *esp) = 0;
+
+  // set add addresses of our argument values onto the stack
+  for (int i = arg_count - 1; i >= 0; i--) {
+    *esp -= sizeof(void*);
+    *((void**) *esp) = argv_addr[i];
+  }
+
+  //set a pointer to pointer of argv 
+  *esp -= sizeof(void*);
+  *((void**) *esp) = *esp + sizeof(void*);
+
+  //set arg count in stack
+  *esp -= sizeof(void*);
+  *((int*) *esp) = arg_count;
+
+  //set return address
+  *esp -= sizeof(void*);
+  *((int*) *esp) = 0;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
