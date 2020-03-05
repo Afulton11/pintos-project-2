@@ -20,6 +20,8 @@ Austin Smith
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
 
+Helpful Repository: https://github.com/wookayin/pintos/
+
 			   ARGUMENT PASSING
 			   ================
 
