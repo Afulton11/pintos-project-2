@@ -17,7 +17,7 @@ struct file_descriptor {
   int id;
   struct file *file;
   struct list_elem elem;
-}
+};
 
 tid_t process_execute (const char *cmd_line);
 int process_wait (tid_t);
