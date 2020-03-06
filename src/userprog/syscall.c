@@ -73,7 +73,7 @@ syscall_handler (struct intr_frame *f)
     {
       int fd = get_arg(f, 1);
       void* buffer = (void*)get_arg(f, 2);
-      unsigned size = get_arg(f, 3);
+      unsigned size = (unsigned)get_arg(f, 3);
 
       set_return(f, sys_write(fd, buffer, size));
       break;
