@@ -46,11 +46,13 @@ process_execute (const char *cmd_line)
        Otherwise there's a race between the caller and load(). */
     strlcpy(cmd_line_copy, cmd_line, PGSIZE);
     /* Place file_name into thread's memory. */
-    strlcpy(file_name, cmd_line_copy, PGSIZE);
-    file_name = strtok_r(cmd_line_copy, " ", &save_ptr);
+    strlcpy(file_name, cmd_line, PGSIZE);
+    file_name = strtok_r(file_name, " ", &save_ptr);
 
     pcb->pid = PID_INIT;
     pcb->cmd_line = cmd_line_copy;
+
+    sema_init(&pcb->start_sema, 0);
 
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (file_name, PRI_DEFAULT, start_process, pcb);
@@ -62,6 +64,10 @@ process_execute (const char *cmd_line)
     palloc_free_page (cmd_line_copy); 
     palloc_free_page (file_name); 
     palloc_free_page (pcb); 
+  } else { 
+    // successfully created process.
+    /* wait until start process initialization finishes. */
+    sema_down(&pcb->start_sema);
   }
 
   return tid;
@@ -100,12 +106,20 @@ start_process (void *pcb_pointer)
     if (success) {
       push_arguments(&if_.esp, arguments, arg_count);
     }
+    /* free our argument page, they are now on the stack. */
+    palloc_free_page(arguments);
   }
+
+  sema_up(&pcb->start_sema);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
+  else {
+    pcb->pid = (pid_t) t->tid;
+    t->pcb = pcb;
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
