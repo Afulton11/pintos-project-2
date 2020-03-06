@@ -521,11 +521,12 @@ push_arguments (void **esp, const char* arguments[], const int arg_count)
   }
 
   // word-align to go to the next "block" of instructions.
+  // easier than using modulus math.
   *esp = (void*)((unsigned int)(*esp) & 0xfffffffc);
 
   // set our very last argument (arg_count + 1) to null, it doesnt exist anyways.
-  *esp -= sizeof(NULL);
-  *((uint32_t*) *esp) = 0;
+  *esp -= sizeof(char*);
+  memset(*esp, 0, sizeof(char*));
 
   // set add addresses of our argument values onto the stack
   for (int i = arg_count - 1; i >= 0; i--) {
@@ -533,19 +534,17 @@ push_arguments (void **esp, const char* arguments[], const int arg_count)
     memcpy(*esp, argv_addr[i], sizeof(char*));
   }
 
-  //set a pointer to pointer of argv 
-  *esp -= sizeof(void*);
-  *((void**) *esp) = *esp + sizeof(void*);
+  // set a pointer to the that last location of esp, its where our address of arg_addr[0] is.
+  *esp -= sizeof(char**);
+  memcpy(*esp, (*esp + sizeof(char*)), sizeof(char**));
 
   //set arg count in stack
-  *esp -= sizeof(void*);
-  *((int*) *esp) = arg_count;
+  *esp -= sizeof(int);
+  memset(*esp, arg_count, sizeof(int));
 
   //set return address to null
   *esp -= sizeof(void*);
   memset(*esp, 0, sizeof(void*));
-
-  hex_dump((uintptr_t)*esp, *esp, sizeof(char) * 32, true);
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
