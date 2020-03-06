@@ -7,7 +7,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-struct lock file;
+struct lock lock_filesys;
 int* get_arg(struct intr_frame *f, int number);
 void set_return(struct intr_frame *f, uint32_t value);
 
@@ -19,7 +19,7 @@ static struct file_descriptor* get_file_descriptor(struct list *descriptors, int
 void
 syscall_init (void) 
 {
-  lock_init(&file);
+  lock_init(&lock_filesys);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -52,9 +52,9 @@ syscall_handler (struct intr_frame *f)
     case SYS_EXEC: 
      {
        void* cmd =(void*)(*((int*)f->esp+1));
-       lock_acquire(&file);
+       lock_acquire(&lock_filesys);
        pid_t pid = process_execute(cmd);
-       lock_release(&file);
+       lock_release(&lock_filesys);
        f->eax = pid;
       break;
      }
@@ -64,9 +64,9 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_CREATE:
     {
-      lock_acquire(&file);
+      lock_acquire(&lock_filesys);
       f->eax = filesys_create((void*)(*((int*)f->esp+1)),*((int*)f->esp+2));
-      lock_release(&file);
+      lock_release(&lock_filesys);
       break;
     }
     case SYS_REMOVE:
@@ -83,11 +83,11 @@ syscall_handler (struct intr_frame *f)
         f->eas = -1;
         break;
       }
-      lock_acquire(&file);
+      lock_acquire(&lock_filesys);
       f=filesys_open((void*)(*((int*)f->esp+1));
       if(!f){
         palloc_free_page(fd);
-        lock_release(&file);
+        lock_release(&lock_filesys);
         f->eax = -1;
         break;
       }
@@ -100,26 +100,26 @@ syscall_handler (struct intr_frame *f)
         fd->id = (list_entry(list_back(fd_list), struct file_descriptor, elem)->id) + 1;
       }
       list_push_back(fd_list, &(fd->elem));
-      lock_release(&file);
+      lock_release(&lock_filesys);
       break;
     }
     case SYS_FILESIZE:
     {
       struct file_descriptor* fd;
-      lock_acquire(&file);
+      lock_acquire(&lock_filesys);
       // get file descriptor from thread current
       if(fd== NULL){
-        lock_release(&file);
+        lock_release(&lock_filesys);
         f->eax = -1;
       }
       f->eax = file_length(fd-file);
-      lock_release(&file);
+      lock_release(&lock_filesys);
       break;
     }
     case SYS_READ:
     {
-      lock_acquire(&file);
-      lock_release(&file);
+      lock_acquire(&lock_filesys);
+      lock_release(&lock_filesys);
       break;
     }
     case SYS_WRITE:
@@ -133,7 +133,7 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_SEEK:
     {
-      lock_acquire(&file);
+      lock_acquire(&lock_filesys);
       struct file_descriptor* fd;
       // get file descriptor from thread current
       if(fd && fd->file){
@@ -142,19 +142,19 @@ syscall_handler (struct intr_frame *f)
       else{
         f->eax = -1;
       }
-      lock_release(&file);
+      lock_release(&lock_filesys);
       break;
     }
     case SYS_TELL:
     {
-      lock_acquire(&file);
-      lock_release(&file);
+      lock_acquire(&lock_filesys);
+      lock_release(&lock_filesys);
       break;
      }
     case SYS_CLOSE:
     {
-      lock_acquire(&file);
-      lock_release(&file);
+      lock_acquire(&lock_filesys);
+      lock_release(&lock_filesys);
       break;
     }
     default:
@@ -194,7 +194,6 @@ int sys_write(int fd, const void* buffer, unsigned size)
   ASSERT(is_user_vaddr(buffer));
   int result = 0;
 
-  lock_acquire(&file);
   if (fd == STDOUT_FILENO)
   {
     // we should write to console output.
@@ -216,7 +215,9 @@ int sys_write(int fd, const void* buffer, unsigned size)
     
     if (descriptor != NULL)
     {
+      lock_acquire(&lock_filesys);
       result = file_write(descriptor->file, buffer, size);
+      lock_release(&lock_filesys);
     }
     else
     {
@@ -224,7 +225,6 @@ int sys_write(int fd, const void* buffer, unsigned size)
     }
   }
 
-  lock_release(&file);
   return result;
 }
 
