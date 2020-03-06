@@ -13,6 +13,12 @@ struct process_control_block {
   struct semaphore start_sema; /* semaphore used to wait until the process has been started. */
 };
 
+struct file_descriptor {
+  int id;
+  struct file *file;
+  struct list_elem elem;
+}
+
 tid_t process_execute (const char *cmd_line);
 int process_wait (tid_t);
 void process_exit (void);
