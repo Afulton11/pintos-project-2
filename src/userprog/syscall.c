@@ -1,8 +1,10 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "devices/shutdown.h"
 #include "userprog/process.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -40,15 +42,19 @@ syscall_handler (struct intr_frame *f)
     {
     shutdown_power_off();
       break;
+    }
     case SYS_EXIT: 
-    int code = *(int*)f->esp+1;
-    struct process_control_block *pcb = thread_current()->pcb;
-    if(pcb != NULL){
-      pcb->exitcode = code;
+    {
+      int code = *(int*)f->esp+1;
+      struct process_control_block *pcb = thread_current()->pcb;
+
+      if(pcb != NULL){
+        pcb->exitcode = code;
       }
+
       thread_exit();
       break;
-    }
+      }
     case SYS_EXEC: 
      {
        void* cmd =(void*)(*((int*)f->esp+1));
@@ -71,27 +77,26 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_REMOVE:
     {
-     if(file)
       break;
     }
     case SYS_OPEN:
     {
       
-      struct file* f;
-      struct file_description* fd = palloc_get_page(0);
+      struct file* file;
+      struct file_descriptor *fd = palloc_get_page(0);
       if(!fd){
-        f->eas = -1;
+        f->eax = -1;
         break;
       }
       lock_acquire(&lock_filesys);
-      f=filesys_open((void*)(*((int*)f->esp+1));
-      if(!f){
+      file=filesys_open((void*)(*((int*)f->esp+1)));
+      if(!file){
         palloc_free_page(fd);
         lock_release(&lock_filesys);
         f->eax = -1;
         break;
       }
-      fd->file=f;
+      fd->file = file;
       struct list* fd_list = &thread_current()->file_descriptors;
       if(list_empty(&fd_list)){
         fd->id = 3;
@@ -112,7 +117,7 @@ syscall_handler (struct intr_frame *f)
         lock_release(&lock_filesys);
         f->eax = -1;
       }
-      f->eax = file_length(fd-file);
+      f->eax = file_length(fd->file);
       lock_release(&lock_filesys);
       break;
     }
@@ -124,7 +129,7 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_WRITE:
     {
-      int fd = get_arg(f, 1);
+      int fd = (int) get_arg(f, 1);
       void* buffer = (void*)get_arg(f, 2);
       unsigned size = (unsigned)get_arg(f, 3);
 
@@ -133,16 +138,16 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_SEEK:
     {
-      lock_acquire(&lock_filesys);
-      struct file_descriptor* fd;
-      // get file descriptor from thread current
+      struct file_descriptor* fd = 
+        get_file_descriptor(&thread_current()->file_descriptors, (int)get_arg(f, 1));
+      
       if(fd && fd->file){
-        f->eax = file_seek(fd->file, *((unsigned*)f->esp+2);
+        lock_acquire(&lock_filesys);
+
+        file_seek(fd->file, *((unsigned*)f->esp+2));
+
+        lock_release(&lock_filesys);
       }
-      else{
-        f->eax = -1;
-      }
-      lock_release(&lock_filesys);
       break;
     }
     case SYS_TELL:

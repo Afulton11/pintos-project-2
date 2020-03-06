@@ -10,6 +10,8 @@ struct process_control_block {
   pid_t pid;  /* pid of the process */
   const char *cmd_line; /* the line used to execute this process */
 
+  int exitcode;
+
   struct semaphore start_sema; /* semaphore used to wait until the process has been started. */
 };
 

@@ -51,6 +51,7 @@ process_execute (const char *cmd_line)
 
     pcb->pid = PID_INIT;
     pcb->cmd_line = cmd_line_copy;
+    pcb->exitcode = 0;
 
     sema_init(&pcb->start_sema, 0);
 
