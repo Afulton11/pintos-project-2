@@ -3,6 +3,7 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -15,6 +16,14 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  printf ("system call!\n");
+  int call_number = -1;
+
+  if (is_user_vaddr(f->esp))
+  {
+    // valid virtual address, read the number.
+    call_number = get_user(f->esp);
+  }
+
+  printf ("system call[%d]!\n", call_number);
   thread_exit ();
 }

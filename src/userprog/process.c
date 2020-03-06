@@ -29,25 +29,25 @@ static void push_arguments (void **esp, const char*[], const int arg_count);
 tid_t
 process_execute (const char *cmd_line)
 {
-  char *file_name = NULL, *save_ptr = NULL;
+  char *exec_name = NULL, *save_ptr = NULL;
   char *cmd_line_copy = NULL;
   struct process_control_block *pcb = NULL;
   tid_t tid;
 
   cmd_line_copy = palloc_get_page(0);
-  file_name = palloc_get_page(0);
+  exec_name = palloc_get_page(0);
   pcb = palloc_get_page(0);
 
   if (cmd_line_copy != NULL
-    && file_name != NULL
+    && exec_name != NULL
     && pcb != NULL) {
 
     /* Make a copy of the line.
        Otherwise there's a race between the caller and load(). */
     strlcpy(cmd_line_copy, cmd_line, PGSIZE);
-    /* Place file_name into thread's memory. */
-    strlcpy(file_name, cmd_line, PGSIZE);
-    file_name = strtok_r(file_name, " ", &save_ptr);
+    /* Place exec_name into thread's memory. */
+    strlcpy(exec_name, cmd_line, PGSIZE);
+    exec_name = strtok_r(exec_name, " ", &save_ptr);
 
     pcb->pid = PID_INIT;
     pcb->cmd_line = cmd_line_copy;
@@ -55,14 +55,14 @@ process_execute (const char *cmd_line)
     sema_init(&pcb->start_sema, 0);
 
     /* Create a new thread to execute FILE_NAME. */
-    tid = thread_create (file_name, PRI_DEFAULT, start_process, pcb);
+    tid = thread_create (exec_name, PRI_DEFAULT, start_process, pcb);
   } else {
     tid = TID_ERROR;
   }
 
   if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy); 
-    palloc_free_page (file_name); 
+    palloc_free_page (exec_name); 
     palloc_free_page (pcb); 
   } else { 
     // successfully created process.
@@ -143,7 +143,10 @@ start_process (void *pcb_pointer)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while (true) {}
+  while (true)
+  {
+    thread_yield();
+  }
   return -1;
 }
 
@@ -526,8 +529,8 @@ push_arguments (void **esp, const char* arguments[], const int arg_count)
 
   // set add addresses of our argument values onto the stack
   for (int i = arg_count - 1; i >= 0; i--) {
-    *esp -= sizeof(void*);
-    *((void**) *esp) = argv_addr[i];
+    *esp -= sizeof(char*);
+    memcpy(*esp, argv_addr[i], sizeof(char*));
   }
 
   //set a pointer to pointer of argv 
@@ -538,9 +541,11 @@ push_arguments (void **esp, const char* arguments[], const int arg_count)
   *esp -= sizeof(void*);
   *((int*) *esp) = arg_count;
 
-  //set return address
+  //set return address to null
   *esp -= sizeof(void*);
-  *((int*) *esp) = 0;
+  memset(*esp, 0, sizeof(void*));
+
+  hex_dump((uintptr_t)*esp, *esp, sizeof(char) * 32, true);
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
