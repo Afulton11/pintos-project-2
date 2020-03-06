@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "userprog/process.h"
+#include "filesys/file.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -121,7 +122,7 @@ syscall_handler (struct intr_frame *f)
       lock_release(&file);
       break;
     }
-    case SYS_WRITE: // no do
+    case SYS_WRITE:
     {
       int fd = get_arg(f, 1);
       void* buffer = (void*)get_arg(f, 2);
@@ -136,7 +137,7 @@ syscall_handler (struct intr_frame *f)
       struct file_descriptor* fd;
       // get file descriptor from thread current
       if(fd && fd->file){
-        f->eax = file_seek(fd->file, *((unsigned*)f->esp+2)
+        f->eax = file_seek(fd->file, *((unsigned*)f->esp+2);
       }
       else{
         f->eax = -1;
@@ -191,9 +192,9 @@ void set_return(struct intr_frame *f, uint32_t value)
 int sys_write(int fd, const void* buffer, unsigned size)
 {
   ASSERT(is_user_vaddr(buffer));
-
   int result = 0;
 
+  lock_acquire(&file);
   if (fd == STDOUT_FILENO)
   {
     // we should write to console output.
@@ -215,10 +216,15 @@ int sys_write(int fd, const void* buffer, unsigned size)
     
     if (descriptor != NULL)
     {
+      result = file_write(descriptor->file, buffer, size);
+    }
+    else
+    {
       result = -1;
     }
   }
 
+  lock_release(&file);
   return result;
 }
 
