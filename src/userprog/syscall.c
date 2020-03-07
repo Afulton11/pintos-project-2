@@ -175,7 +175,6 @@ syscall_handler (struct intr_frame *f)
   }
 
   printf ("system call[%d]!\n", call_number);
-  thread_exit ();
 }
 
 /*
