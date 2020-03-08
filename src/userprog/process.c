@@ -67,11 +67,14 @@ process_execute (const char *cmd_line)
     tid = TID_ERROR;
   }
 
-  if (tid == TID_ERROR) {
+  if (tid == TID_ERROR)
+  {
     if(cmd_line_copy) palloc_free_page (cmd_line_copy); 
     if(exec_name) palloc_free_page (exec_name); 
     if(pcb) palloc_free_page (pcb); 
-  } else { 
+  }
+  else
+  {
     // successfully created process.
     /* wait until start process initialization finishes. */
     sema_down(&pcb->start_sema);
@@ -81,8 +84,11 @@ process_execute (const char *cmd_line)
     {
       list_push_back(&thread_current()->children, &pcb->elem);
     }
+    else
+    {
+      tid = TID_ERROR;
+    }
 
-    
     palloc_free_page(exec_name);
   }
 

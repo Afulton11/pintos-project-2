@@ -13,6 +13,7 @@
 struct lock lock_filesys;
 int get_arg(struct intr_frame *f, int number);
 void* get_arg_pointer(struct intr_frame *frame, int number);
+void validate_buffer(void* buffer, unsigned size); 
 void set_return(struct intr_frame *f, uint32_t value);
 
 int sys_write(int fd, const void* buffer, unsigned size);
@@ -94,8 +95,9 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_REMOVE:
     {
+      const char* name = (char*) get_arg_pointer(f, 1);
       lock_acquire(&lock_filesys);
-      int r = filesys_remove(get_arg(f, 1));
+      int r = filesys_remove(name);
       lock_release(&lock_filesys);
       set_return(f, r);
       break;
@@ -169,6 +171,8 @@ syscall_handler (struct intr_frame *f)
       void* buffer = get_arg_pointer(f, 2);
       unsigned size = (unsigned)get_arg(f, 3);
 
+      validate_buffer(buffer, size);
+
       set_return(f, sys_write(fd, buffer, size));
       break;
     }
@@ -188,24 +192,33 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_TELL:
     {
+      int fd_id = get_arg(f, 1);
+      struct list *descriptor_list = &thread_current()->file_descriptors;
+      struct file_descriptor* fd = get_file_descriptor(descriptor_list, fd_id);
       lock_acquire(&lock_filesys);
-      struct file_descriptor* fd = get_file_descriptor(descriptor_list, get_arg(f, 1));
-      if(!fd || fd->file == null){
+
+      if(fd == NULL || fd->file == NULL)
+      {
         set_return(f, -1);
       }
-      else{
-        set_return(f, file_tell(fd->file))
+      else
+      {
+        set_return(f, file_tell(fd->file));
       }
       lock_release(&lock_filesys);
       break;
      }
     case SYS_CLOSE:
     {
+      int fd_id = get_arg(f, 1);
+      struct list *descriptor_list = &thread_current()->file_descriptors;
+      struct file_descriptor* fd = get_file_descriptor(descriptor_list, fd_id);
+
       lock_acquire(&lock_filesys);
-      struct file_descriptor fd = get_file_descriptor(descriptor_list, get_arg(f, 1));
       file_close(fd->file);
-      palloc_free_page(fd);
       lock_release(&lock_filesys);
+
+      palloc_free_page(fd);
       break;
     }
     default:
@@ -252,6 +265,14 @@ void* get_arg_pointer(struct intr_frame *frame, int arg_number)
   }
 
   return vaddress;
+}
+
+void validate_buffer(void* buffer, unsigned size)
+{
+  if (!is_valid_user_vaddr((void*)(buffer + size - 1)))
+  {
+    fail_safely();
+  }
 }
 
 /*
