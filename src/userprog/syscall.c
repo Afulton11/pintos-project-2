@@ -94,6 +94,10 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_REMOVE:
     {
+      lock_acquire(&lock_filesys);
+      int r = filesys_remove(get_arg(f, 1));
+      lock_release(&lock_filesys);
+      set_return(f, r);
       break;
     }
     case SYS_OPEN:
@@ -153,7 +157,7 @@ syscall_handler (struct intr_frame *f)
       lock_release(&lock_filesys);
       break;
     }
-    case SYS_READ:
+    case SYS_READ: // boi
     {
       lock_acquire(&lock_filesys);
       lock_release(&lock_filesys);
@@ -185,12 +189,22 @@ syscall_handler (struct intr_frame *f)
     case SYS_TELL:
     {
       lock_acquire(&lock_filesys);
+      struct file_descriptor* fd = get_file_descriptor(descriptor_list, get_arg(f, 1));
+      if(!fd || fd->file == null){
+        set_return(f, -1);
+      }
+      else{
+        set_return(f, file_tell(fd->file))
+      }
       lock_release(&lock_filesys);
       break;
      }
     case SYS_CLOSE:
     {
       lock_acquire(&lock_filesys);
+      struct file_descriptor fd = get_file_descriptor(descriptor_list, get_arg(f, 1));
+      file_close(fd->file);
+      palloc_free_page(fd);
       lock_release(&lock_filesys);
       break;
     }
