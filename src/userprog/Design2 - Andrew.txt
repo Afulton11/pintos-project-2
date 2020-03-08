@@ -136,13 +136,17 @@ The id is incremented by 1 each time.
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
 
-// READING DATA
-
 // WRITING DATA
 First, we check if the fd is STDOUT, if so we write to the console by putting 
 bytes, up to 300 at a time, onto the console buffer using putbuf().
 Otherwise, we get the file attached to the given file descriptor (fd)
 and, acquiring a file systsem lock, we use file_write(...) to write the buffer to the fiel.
+
+// READING DATA
+Similar to writing, but we check for a STDIN fd and read from console input
+using the `input_getc()` method, a byte at a time. If we fail while writing to the buffer
+any characters, we safely fail out of the process. If the fd is a file, 
+we simply return the result of reading the file through `file_read(...)`
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -252,12 +256,23 @@ the quarter.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
 
+Too hard, The project is very vague and hard to follow. I had to find an outside resource,
+the one from squarespace, which was very very hard to find to better explaing the project.
+
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
 
->> Is there some particular fact or hint we should give students in
+yes. I thinking working on each part -- especially the system calls -- gave me a 
+greater insight into some aspects of OS design. I know that kernels and user threads only talk
+to eachother by passing interrup frames rather than directly calling methods. Additionally
+I know how to setup a stack for argument calls and read the stack for arguments.
+
+>> Is there some particular fact or  hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
+
+Guidance was too vague, I took the wrong turn a lot and ended up with lots of seg faults and
+errors that seemed impossible to debug. I had to use an outside project description
 
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
