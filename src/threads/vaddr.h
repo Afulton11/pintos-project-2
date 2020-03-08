@@ -20,6 +20,12 @@
 #define PGSIZE  (1 << PGBITS)              /* Bytes in a page. */
 #define PGMASK  BITMASK(PGSHIFT, PGBITS)   /* Page offset bits (0:12). */
 
+/*
+  ADDRESS where the process code segment starts in pintos for project 2.
+  The stack is currently fixed.
+*/
+#define CODE_SEGMENT ((void*) 0x08048000)
+
 /* Offset within a page. */
 static inline unsigned pg_ofs (const void *va) {
   return (uintptr_t) va & PGMASK;
@@ -84,6 +90,14 @@ vtop (const void *vaddr)
   ASSERT (is_kernel_vaddr (vaddr));
 
   return (uintptr_t) vaddr - (uintptr_t) PHYS_BASE;
+}
+
+static inline bool
+is_valid_user_vaddr(const void *vaddr)
+{
+  return vaddr != NULL 
+    && is_user_vaddr(vaddr)
+    && vaddr > CODE_SEGMENT;
 }
 
 #endif /* threads/vaddr.h */

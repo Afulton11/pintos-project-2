@@ -12,6 +12,7 @@
 
 struct lock lock_filesys;
 int get_arg(struct intr_frame *f, int number);
+void* get_arg_pointer(struct intr_frame *frame, int number);
 void set_return(struct intr_frame *f, uint32_t value);
 
 int sys_write(int fd, const void* buffer, unsigned size);
@@ -20,6 +21,7 @@ int system_wait(pid_t pid);
 
 static void syscall_handler (struct intr_frame *);
 static struct file_descriptor* get_file_descriptor(struct list *descriptors, int fd);
+static void fail_safely(void);
 
 void
 syscall_init (void) 
@@ -28,16 +30,24 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+/*
+  Fail without crashing the OS, but safely exiting the process.
+*/
+static void fail_safely(void)
+{
+  if (lock_held_by_current_thread(&lock_filesys))
+  {
+    lock_release(&lock_filesys);
+  }
+
+  system_exit(-1);
+  NOT_REACHED();
+}
+
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  int call_number = -1;
-
-  if (f->esp != NULL && is_user_vaddr(f->esp))
-  {
-    // valid virtual address, read the sys call number.
-    call_number = *(int*)f->esp;
-  }
+  int call_number = get_arg(f, 0);
 
   switch (call_number)
   {
@@ -55,7 +65,7 @@ syscall_handler (struct intr_frame *f)
       }
     case SYS_EXEC: 
      {
-       const char* cmd = (char*)get_arg(f, 1);
+       const char* cmd = (char*)get_arg_pointer(f, 1);
 
        lock_acquire(&lock_filesys);
        const pid_t pid = process_execute(cmd);
@@ -72,7 +82,7 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_CREATE:
     {
-      const char* name = (char*)get_arg(f, 1);
+      const char* name = (char*)get_arg_pointer(f, 1);
       const off_t initial_size = (off_t)get_arg(f, 2);
 
       lock_acquire(&lock_filesys);
@@ -97,7 +107,7 @@ syscall_handler (struct intr_frame *f)
         break;
       }
 
-      const char* name = (char*)get_arg(f, 1);
+      const char* name = (char*)get_arg_pointer(f, 1);
       lock_acquire(&lock_filesys);
 
       file = filesys_open(name);
@@ -133,11 +143,13 @@ syscall_handler (struct intr_frame *f)
       struct file_descriptor* fd = get_file_descriptor(descriptor_list, fd_id);
 
       lock_acquire(&lock_filesys);
-      if(fd == NULL){
+      if(fd == NULL)
+      {
         lock_release(&lock_filesys);
-        f->eax = -1;
+        set_return(f, -1);
       }
-      f->eax = file_length(fd->file);
+
+      set_return(f, file_length(fd->file));
       lock_release(&lock_filesys);
       break;
     }
@@ -150,7 +162,7 @@ syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
     {
       int fd = (int) get_arg(f, 1);
-      void* buffer = (void*)(*((int*) f->esp + 2));
+      void* buffer = get_arg_pointer(f, 2);
       unsigned size = (unsigned)get_arg(f, 3);
 
       set_return(f, sys_write(fd, buffer, size));
@@ -161,7 +173,7 @@ syscall_handler (struct intr_frame *f)
       struct file_descriptor* fd = 
         get_file_descriptor(&thread_current()->file_descriptors, (int)get_arg(f, 1));
       
-      if(fd && fd->file){
+      if(fd != NULL && fd->file){
         lock_acquire(&lock_filesys);
 
         file_seek(fd->file, *((unsigned*)f->esp+2));
@@ -189,6 +201,7 @@ syscall_handler (struct intr_frame *f)
        * DONT KERNEL PANIC.
        * Free the processes' resources and terminate it.
        */
+      fail_safely();
       break;
     }
   
@@ -198,11 +211,33 @@ syscall_handler (struct intr_frame *f)
 }
 
 /*
-  Gets the [i]th argument from the system call stack.
+  Gets the [i]th argument from the system call stack, validating the location of the stack pointer.
 */
 int get_arg(struct intr_frame *f, int i)
 {
+  if (!is_valid_user_vaddr(f->esp))
+  {
+    fail_safely();
+  }
+
   return *((int*) f->esp + i);
+}
+
+/*
+  Gets the [i]th argument from the system call stack,
+  validating the location of the frame's stack pointer through get_arg,
+  and validating the location the pointer itself.
+*/
+void* get_arg_pointer(struct intr_frame *frame, int arg_number)
+{
+  void* vaddress = (void*)get_arg(frame, arg_number);
+  
+  if (!is_valid_user_vaddr(vaddress))
+  {
+    fail_safely();
+  }
+
+  return vaddress;
 }
 
 /*
