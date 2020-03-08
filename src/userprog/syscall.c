@@ -55,26 +55,31 @@ syscall_handler (struct intr_frame *f)
       }
     case SYS_EXEC: 
      {
-       void* cmd =(void*)get_arg(f, 1);
+       const char* cmd = (char*)get_arg(f, 1);
 
        lock_acquire(&lock_filesys);
-       pid_t pid = process_execute(cmd);
+       const pid_t pid = process_execute(cmd);
        lock_release(&lock_filesys);
 
        set_return(f, pid);
       break;
      }
-    case SYS_WAIT: // no do
+    case SYS_WAIT:
     {
-      pid_t pid = get_arg(f, 1);
+      const pid_t pid = get_arg(f, 1);
       set_return(f, system_wait(pid));
       break;
     }
     case SYS_CREATE:
     {
+      const char* name = (char*)get_arg(f, 1);
+      const off_t initial_size = (off_t)get_arg(f, 2);
+
       lock_acquire(&lock_filesys);
-      f->eax = filesys_create((void*)get_arg(f, 1),get_arg(f, 2));
+      const bool didCreate = filesys_create(name, initial_size);
       lock_release(&lock_filesys);
+
+      set_return(f, didCreate);
       break;
     }
     case SYS_REMOVE:
@@ -83,39 +88,49 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_OPEN:
     {
-      struct file* file;
+      struct file* file = NULL;
       struct file_descriptor *fd = (struct file_descriptor*) palloc_get_page(0);
-      if(!fd)
+
+      if(fd == NULL)
       {
-        f->eax = -1;
+        set_return(f, -1);
         break;
       }
 
+      const char* name = (char*)get_arg(f, 1);
       lock_acquire(&lock_filesys);
-      file=filesys_open((void*)get_arg(f, 1));
 
-      if(!file)
+      file = filesys_open(name);
+      if(file == NULL)
       {
         palloc_free_page(fd);
         lock_release(&lock_filesys);
-        f->eax = -1;
+        set_return(f, -1);
         break;
       }
       fd->file = file;
-      struct list* fd_list = &thread_current()->file_descriptors;
-      if(list_empty(fd_list)){
-        fd->id = 3;
+
+      struct list *fd_list = &thread_current()->file_descriptors;
+      if(list_empty(fd_list))
+      {
+        fd->id = STDOUT_FILENO + 1;
       }
-      else{
-        fd->id = (list_entry(list_back(fd_list), struct file_descriptor, elem)->id) + 1;
+      else
+      {
+        struct list_elem *last_elem = list_back(fd_list);
+        struct file_descriptor *last_descriptor = list_entry(last_elem, struct file_descriptor, elem);
+        fd->id = last_descriptor->id + 1;
       }
+
       list_push_back(fd_list, &(fd->elem));
       lock_release(&lock_filesys);
       break;
     }
     case SYS_FILESIZE:
     {
-      struct file_descriptor* fd = get_file_descriptor(&thread_current()->file_descriptors, get_arg(f, 1));
+      const int fd_id = get_arg(f, 1);
+      struct list *descriptor_list = &thread_current()->file_descriptors;
+      struct file_descriptor* fd = get_file_descriptor(descriptor_list, fd_id);
 
       lock_acquire(&lock_filesys);
       if(fd == NULL){
