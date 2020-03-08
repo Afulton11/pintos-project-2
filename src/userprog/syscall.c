@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "devices/shutdown.h"
+#include "devices/input.h"
 #include "userprog/process.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -16,7 +17,8 @@ void* get_arg_pointer(struct intr_frame *frame, int number);
 void validate_buffer(void* buffer, unsigned size); 
 void set_return(struct intr_frame *f, uint32_t value);
 
-int sys_write(int fd, const void* buffer, unsigned size);
+int system_write(int fd, const void* buffer, unsigned size);
+int system_read(int fd, void* buffer, unsigned size);
 void system_exit(int error_code);
 int system_wait(pid_t pid);
 
@@ -159,10 +161,19 @@ syscall_handler (struct intr_frame *f)
       lock_release(&lock_filesys);
       break;
     }
-    case SYS_READ: // boi
+    case SYS_READ:
     {
+      int fd = (int) get_arg(f, 1);
+      void* buffer = get_arg_pointer(f, 2);
+      unsigned size = (unsigned)get_arg(f, 3);
+
+      validate_buffer(buffer, size);
+
       lock_acquire(&lock_filesys);
+      int result = system_read(fd, buffer, size);
       lock_release(&lock_filesys);
+
+      set_return(f, result);
       break;
     }
     case SYS_WRITE:
@@ -173,7 +184,7 @@ syscall_handler (struct intr_frame *f)
 
       validate_buffer(buffer, size);
 
-      set_return(f, sys_write(fd, buffer, size));
+      set_return(f, system_write(fd, buffer, size));
       break;
     }
     case SYS_SEEK:
@@ -302,10 +313,11 @@ int system_wait(pid_t pid)
   return process_wait(pid);
 }
 
-int sys_write(int fd, const void* buffer, unsigned size)
+int system_write(int fd, const void* buffer, unsigned size)
 {
   ASSERT(is_user_vaddr(buffer));
   int result = 0;
+  lock_acquire(&lock_filesys);
 
   if (fd == STDOUT_FILENO)
   {
@@ -326,11 +338,9 @@ int sys_write(int fd, const void* buffer, unsigned size)
     struct file_descriptor *descriptor = 
         get_file_descriptor(&thread_current()->file_descriptors, fd);
     
-    if (descriptor != NULL)
+    if (descriptor != NULL && descriptor->file != NULL)
     {
-      lock_acquire(&lock_filesys);
       result = file_write(descriptor->file, buffer, size);
-      lock_release(&lock_filesys);
     }
     else
     {
@@ -338,6 +348,47 @@ int sys_write(int fd, const void* buffer, unsigned size)
     }
   }
 
+  lock_release(&lock_filesys);
+  return result;
+}
+
+int system_read(int fd, void* buffer, unsigned size)
+{
+  int result = 0;
+  lock_acquire(&lock_filesys);
+
+  if (fd == STDIN_FILENO)
+  {
+    // we should write to console output.
+    // split up larger buffers (> 300 bytes)
+    unsigned read_bytes = 0;
+    while (read_bytes < size)
+    {
+      uint8_t read_c = input_getc();
+      if(!put_user(buffer + read_bytes, read_c))
+      {
+        fail_safely();
+      }
+      read_bytes++;
+    }
+    result = read_bytes;
+  }
+  else
+  {
+    // we should write to a file.
+    struct file_descriptor *descriptor = 
+        get_file_descriptor(&thread_current()->file_descriptors, fd);
+    
+    if (descriptor != NULL && descriptor->file != NULL)
+    {
+      result = file_read(descriptor->file, buffer, size);
+    }
+    else
+    {
+      result = -1;
+    }
+  }
+  lock_release(&lock_filesys);
   return result;
 }
 
