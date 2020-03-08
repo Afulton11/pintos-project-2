@@ -16,6 +16,7 @@ void set_return(struct intr_frame *f, uint32_t value);
 
 int sys_write(int fd, const void* buffer, unsigned size);
 void system_exit(int error_code);
+int system_wait(pid_t pid);
 
 static void syscall_handler (struct intr_frame *);
 static struct file_descriptor* get_file_descriptor(struct list *descriptors, int fd);
@@ -65,6 +66,8 @@ syscall_handler (struct intr_frame *f)
      }
     case SYS_WAIT: // no do
     {
+      pid_t pid = get_arg(f, 1);
+      set_return(f, system_wait(pid));
       break;
     }
     case SYS_CREATE:
@@ -207,6 +210,11 @@ void system_exit(int error_code)
   }
 
   thread_exit();
+}
+
+int system_wait(pid_t pid)
+{
+  return process_wait(pid);
 }
 
 int sys_write(int fd, const void* buffer, unsigned size)
