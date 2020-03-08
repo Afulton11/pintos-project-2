@@ -157,9 +157,20 @@ syscall_handler (struct intr_frame *f)
       lock_release(&lock_filesys);
       break;
     }
-    case SYS_READ: // boi
+    case SYS_READ:
     {
+      struct file_descriptor* fd = get_file_descriptor(descriptor_list, get_arg(f, 1));
+      void* buffer = (void*)(*((int*) f->esp + 2));
+      unsigned size = (unsigned)get_arg(f, 3);
+
       lock_acquire(&lock_filesys);
+      if(fd == NULL)
+      {
+        lock_release(&lock_filesys);
+        set_return(f, -1);
+      }
+
+      set_return(f, sys_read(fd->file, buffer, size));
       lock_release(&lock_filesys);
       break;
     }
