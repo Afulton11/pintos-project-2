@@ -467,6 +467,8 @@ init_thread (struct thread *t, const char *name, int priority)
 #ifdef USERPROG
   t->pcb = NULL;
   list_init(&t->file_descriptors);
+  list_init(&t->children);
+  t->executing_file = NULL;
 #endif
 
   old_level = intr_disable ();

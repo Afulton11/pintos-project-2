@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -50,10 +51,15 @@ process_execute (const char *cmd_line)
     exec_name = strtok_r(exec_name, " ", &save_ptr);
 
     pcb->pid = PID_INIT;
+    pcb->parent = thread_current();
     pcb->cmd_line = cmd_line_copy;
-    pcb->exitcode = 0;
+    pcb->is_waiting = false;
+    pcb->has_exited = false;
+    pcb->is_orphan = false;
+    pcb->exitcode = -1;
 
     sema_init(&pcb->start_sema, 0);
+    sema_init(&pcb->wait_sema, 0);
 
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create (exec_name, PRI_DEFAULT, start_process, pcb);
@@ -62,13 +68,22 @@ process_execute (const char *cmd_line)
   }
 
   if (tid == TID_ERROR) {
-    palloc_free_page (cmd_line_copy); 
-    palloc_free_page (exec_name); 
-    palloc_free_page (pcb); 
+    if(cmd_line_copy) palloc_free_page (cmd_line_copy); 
+    if(exec_name) palloc_free_page (exec_name); 
+    if(pcb) palloc_free_page (pcb); 
   } else { 
     // successfully created process.
     /* wait until start process initialization finishes. */
     sema_down(&pcb->start_sema);
+    if (cmd_line_copy) palloc_free_page(cmd_line_copy);
+
+    if (pcb->pid >= 0)
+    {
+      list_push_back(&thread_current()->children, &pcb->elem);
+    }
+
+    
+    palloc_free_page(exec_name);
   }
 
   return tid;
@@ -79,11 +94,11 @@ process_execute (const char *cmd_line)
 static void
 start_process (void *pcb_pointer)
 {
+  struct intr_frame if_;
   struct thread *t = thread_current();
   struct process_control_block *pcb = pcb_pointer;
 
   char *file_name = (char*) pcb->cmd_line;
-  struct intr_frame if_;
   bool success = false;
 
   const char **arguments = (const char**) palloc_get_page(0);
@@ -107,20 +122,19 @@ start_process (void *pcb_pointer)
     if (success) {
       push_arguments(&if_.esp, arguments, arg_count);
     }
+
     /* free our argument page, they are now on the stack. */
     palloc_free_page(arguments);
   }
 
+  pcb->pid = success ? (pid_t) t->tid : PID_ERROR;
+  t->pcb = pcb;
+
   sema_up(&pcb->start_sema);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
   if (!success) 
-    thread_exit ();
-  else {
-    pcb->pid = (pid_t) t->tid;
-    t->pcb = pcb;
-  }
+    system_exit(-1);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -144,11 +158,48 @@ start_process (void *pcb_pointer)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while (true)
+  struct thread *t = thread_current();
+  struct list children = t->children;
+
+  struct process_control_block *child_pcb = NULL;
+
+  if (!list_empty(&children))
   {
-    thread_yield();
+    // find child process.
+    struct list_elem *e = NULL;
+    for (e = list_begin (&children); e != list_end (&children);
+          e = list_next (e))
+      {
+        struct process_control_block *some_pcb = list_entry(e, struct process_control_block, elem);
+
+        if (((tid_t) some_pcb->pid) == child_tid)
+        {
+          // we found the child's pcb!
+          child_pcb = some_pcb;
+          break;
+        }
+      }
   }
-  return -1;
+
+  // no child process found or process is already waiting.
+  if (child_pcb == NULL || child_pcb->is_waiting) return -1;
+
+  child_pcb->is_waiting = true;
+
+  if (!child_pcb->has_exited)
+  {
+    sema_down(&child_pcb->wait_sema);
+  }
+
+  // child should now be dead, we can be done waiting!
+  ASSERT(child_pcb != NULL)
+  list_remove(&child_pcb->elem);
+  
+  // save exitcode before freeing it.
+  int exitcode = child_pcb->exitcode;
+
+  palloc_free_page(child_pcb);
+  return exitcode;
 }
 
 /* Free the current process's resources. */
@@ -156,11 +207,60 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
-  uint32_t *pd;
+  uint32_t *pd = cur->pagedir;
+
+  /* clean up process' file descriptors */
+  struct list file_descriptors = cur->file_descriptors;
+  struct list_elem *e;
+  struct file_descriptor *descriptor;
+
+  while (!list_empty(&file_descriptors))
+  {
+    e = list_pop_front (&file_descriptors);
+    descriptor = list_entry(e, struct file_descriptor, elem);
+
+    file_close(descriptor->file);
+    // free the page assigned to the descriptor when this file was opened.
+    palloc_free_page(descriptor);
+  }
+
+  if (cur->executing_file != NULL)
+  {
+    file_allow_write(cur->executing_file);
+    file_close(cur->executing_file);
+  }
+
+  /* clean up any children of this process. */
+  struct list children = cur->children;
+  struct process_control_block *pcb;
+  while (!list_empty(&children))
+  {
+    e = list_pop_front(&children);
+    pcb = list_entry(e, struct process_control_block, elem);
+
+    if (pcb->has_exited)
+    {
+      palloc_free_page(pcb);
+    }
+    else
+    {
+      pcb->is_orphan = true;
+      pcb->parent = NULL;
+    }
+  }
+
+  cur->pcb->has_exited = true;
+  // save the orphan status of the pcb before its freed in process_wait.
+  bool is_orphan = cur->pcb->is_orphan;
+  sema_up(&cur->pcb->wait_sema);
+
+  if (is_orphan)
+  {
+    palloc_free_page(&cur->pcb);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
   if (pd != NULL) 
     {
       /* Correct ordering here is crucial.  We must set
@@ -368,11 +468,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  file_deny_write(file);
+  t->executing_file = file;
+
   success = true;
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
@@ -497,7 +599,9 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
+      {
         *esp = PHYS_BASE;
+      }
       else
         palloc_free_page (kpage);
     }
@@ -508,44 +612,42 @@ static void
 push_arguments (void **esp, const char* arguments[], const int arg_count)
 {
   ASSERT(arg_count > -1);
-  // see section 3.5.1 for how arguments are laid out for a starting a program.
 
-  void *argv_addr[arg_count];
+  void* argv_addr[arg_count];
 
-  for (int i = 0; i < arg_count; i++) {
+  for (int i = arg_count - 1; i > -1; i--) {
     int len = strlen(arguments[i]) + 1;
-    // move the esp to the next empty argument position
     *esp -= len;
-    // copy argument at i into the current location of the stack pointer.
     memcpy(*esp, arguments[i], len);
     argv_addr[i] = *esp;
   }
 
-  // word-align to go to the next "block" of instructions.
-  // easier than using modulus math.
+  // word align
   *esp = (void*)((unsigned int)(*esp) & 0xfffffffc);
 
-  // set our very last argument (arg_count + 1) to null, it doesnt exist anyways.
-  *esp -= sizeof(char*);
-  memset(*esp, 0, sizeof(char*));
+  // last null
+  *esp -= sizeof(uint32_t);
+  memset(*esp, 0, sizeof(uint32_t));
 
-  // set add addresses of our argument values onto the stack
-  for (int i = arg_count - 1; i >= 0; i--) {
+  // setting **esp with argvs
+  for (int i = arg_count - 1; i > -1; i--) {
     *esp -= sizeof(char*);
-    memcpy(*esp, argv_addr[i], sizeof(char*));
+    memcpy(*esp, &argv_addr[i], sizeof(char*));
+    // *((void**) *esp) = argv_addr[i];
   }
 
-  // set a pointer to the that last location of esp, its where our address of arg_addr[0] is.
+  int** argv_start = *esp;
+  // setting **argv (addr of stack, esp)
   *esp -= sizeof(char**);
-  memcpy(*esp, (*esp + sizeof(char*)), sizeof(char**));
+  memcpy(*esp, &argv_start, sizeof(char**));
 
-  //set arg count in stack
+  // setting argc
   *esp -= sizeof(int);
-  memset(*esp, arg_count, sizeof(int));
+  memcpy(*esp, &arg_count, sizeof(int));
 
-  //set return address to null
-  *esp -= sizeof(void*);
-  memset(*esp, 0, sizeof(void*));
+  // setting ret addr
+  *esp -= sizeof(int*);
+  memset(*esp, 0, sizeof(int*));
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

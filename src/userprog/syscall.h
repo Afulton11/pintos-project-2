@@ -3,4 +3,6 @@
 
 void syscall_init (void);
 
+void system_exit(int error_code);
+
 #endif /* userprog/syscall.h */

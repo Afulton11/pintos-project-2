@@ -10,9 +10,16 @@ struct process_control_block {
   pid_t pid;  /* pid of the process */
   const char *cmd_line; /* the line used to execute this process */
 
+  bool is_waiting;    /* whether or not the process is currently waiting */
+  bool has_exited;     /* whether this process has exited. */
+  bool is_orphan;     /* whether this child's parent has been terminated */
   int exitcode;
 
+  struct thread* parent;
+  struct list_elem elem;
+
   struct semaphore start_sema; /* semaphore used to wait until the process has been started. */
+  struct semaphore wait_sema; /* semaphore used to wait until thde children have exited. */
 };
 
 struct file_descriptor {

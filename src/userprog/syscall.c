@@ -8,12 +8,14 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
 
 struct lock lock_filesys;
-int* get_arg(struct intr_frame *f, int number);
+int get_arg(struct intr_frame *f, int number);
 void set_return(struct intr_frame *f, uint32_t value);
 
 int sys_write(int fd, const void* buffer, unsigned size);
+void system_exit(int error_code);
 
 static void syscall_handler (struct intr_frame *);
 static struct file_descriptor* get_file_descriptor(struct list *descriptors, int fd);
@@ -30,38 +32,35 @@ syscall_handler (struct intr_frame *f)
 {
   int call_number = -1;
 
-  if (is_user_vaddr(f->esp))
+  if (f->esp != NULL && is_user_vaddr(f->esp))
   {
     // valid virtual address, read the sys call number.
-    call_number = get_user(f->esp);
+    call_number = *(int*)f->esp;
   }
 
   switch (call_number)
   {
     case SYS_HALT: 
     {
-    shutdown_power_off();
+      shutdown_power_off();
       break;
     }
     case SYS_EXIT: 
     {
-      int code = *(int*)f->esp+1;
-      struct process_control_block *pcb = thread_current()->pcb;
+      int code = get_arg(f, 1);
+      system_exit(code);
 
-      if(pcb != NULL){
-        pcb->exitcode = code;
-      }
-
-      thread_exit();
       break;
       }
     case SYS_EXEC: 
      {
-       void* cmd =(void*)(*((int*)f->esp+1));
+       void* cmd =(void*)get_arg(f, 1);
+
        lock_acquire(&lock_filesys);
        pid_t pid = process_execute(cmd);
        lock_release(&lock_filesys);
-       f->eax = pid;
+
+       set_return(f, pid);
       break;
      }
     case SYS_WAIT: // no do
@@ -71,7 +70,7 @@ syscall_handler (struct intr_frame *f)
     case SYS_CREATE:
     {
       lock_acquire(&lock_filesys);
-      f->eax = filesys_create((void*)(*((int*)f->esp+1)),*((int*)f->esp+2));
+      f->eax = filesys_create((void*)get_arg(f, 1),get_arg(f, 2));
       lock_release(&lock_filesys);
       break;
     }
@@ -81,16 +80,19 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_OPEN:
     {
-      
       struct file* file;
-      struct file_descriptor *fd = palloc_get_page(0);
-      if(!fd){
+      struct file_descriptor *fd = (struct file_descriptor*) palloc_get_page(0);
+      if(!fd)
+      {
         f->eax = -1;
         break;
       }
+
       lock_acquire(&lock_filesys);
-      file=filesys_open((void*)(*((int*)f->esp+1)));
-      if(!file){
+      file=filesys_open((void*)get_arg(f, 1));
+
+      if(!file)
+      {
         palloc_free_page(fd);
         lock_release(&lock_filesys);
         f->eax = -1;
@@ -98,7 +100,7 @@ syscall_handler (struct intr_frame *f)
       }
       fd->file = file;
       struct list* fd_list = &thread_current()->file_descriptors;
-      if(list_empty(&fd_list)){
+      if(list_empty(fd_list)){
         fd->id = 3;
       }
       else{
@@ -110,10 +112,10 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_FILESIZE:
     {
-      struct file_descriptor* fd;
+      struct file_descriptor* fd = get_file_descriptor(&thread_current()->file_descriptors, get_arg(f, 1));
+
       lock_acquire(&lock_filesys);
-      // get file descriptor from thread current
-      if(fd== NULL){
+      if(fd == NULL){
         lock_release(&lock_filesys);
         f->eax = -1;
       }
@@ -130,7 +132,7 @@ syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
     {
       int fd = (int) get_arg(f, 1);
-      void* buffer = (void*)get_arg(f, 2);
+      void* buffer = (void*)(*((int*) f->esp + 2));
       unsigned size = (unsigned)get_arg(f, 3);
 
       set_return(f, sys_write(fd, buffer, size));
@@ -174,13 +176,13 @@ syscall_handler (struct intr_frame *f)
   
   }
 
-  printf ("system call[%d]!\n", call_number);
+  // printf ("system call[%d]!\n", call_number);
 }
 
 /*
   Gets the [i]th argument from the system call stack.
 */
-int* get_arg(struct intr_frame *f, int i)
+int get_arg(struct intr_frame *f, int i)
 {
   return *((int*) f->esp + i);
 }
@@ -191,6 +193,20 @@ int* get_arg(struct intr_frame *f, int i)
 void set_return(struct intr_frame *f, uint32_t value)
 {
   f->eax = value;
+}
+
+void system_exit(int error_code)
+{
+  // we are exiting the user process safely, without halting
+  printf("%s: exit(%d)\n", thread_current()->name, error_code);
+
+  struct process_control_block *pcb = thread_current()->pcb;
+
+  if(pcb != NULL){
+    pcb->exitcode = error_code;
+  }
+
+  thread_exit();
 }
 
 int sys_write(int fd, const void* buffer, unsigned size)

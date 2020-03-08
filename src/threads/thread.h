@@ -97,8 +97,11 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct process_control_block *pcb;   /* This thread's process control block. */
-    
+   
+    struct list children;  /* List of children processes (of pcb) in this thread */
     struct list file_descriptors;  /* a list of opened file descriptors */
+
+    struct file *executing_file;
 #endif
 
     /* Owned by thread.c. */
