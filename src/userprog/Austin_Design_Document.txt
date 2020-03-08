@@ -1,0 +1,242 @@
+		           +--------------------------+
+				   |         CIS 520          |
+		           | PROJECT 2: USER PROGRAMS |
+		           |     DESIGN DOCUMENT      |
+		           +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names of your group members.
+
+Austin Smith
+Andrew Fulton
+Patrick Kliesner
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+Helpful Repository: https://github.com/wookayin/pintos/
+https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7b16b7a2ed6/1535507195196/Pintos+Guide
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+/* represents a process in the OS, AKA PCB or Task Control Block */
+struct process_control_block {
+  pid_t pid;  /* pid of the process, same as the thread id since we have a one-to-one relationship */
+  const char *cmd_line; /* the line used to execute this process (includes arguments) */
+
+  struct semaphore start_sema; /* semaphore used to wait until the process has been started. */
+};
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+	
+	Argument Passing is done in the following sequence: First the arguments are pushed in reverse onto the stack, 
+	then it uses an AND operator to do a word alignment and go into the next set of instructions.
+	After all arguements are processed, a null value is passed into the final+1 space.
+	Once this is done, all arguments addresses are pushed in reverse order followed by the pointer to the first argument.
+	The final pushes are the argument count and a null return address.
+
+	avoid overflowing..? 
+	No current checks for overflow, but possible implementation would include argument limiters
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+	strtok_r allows for interruption where as strtok does not.
+
+>> A4: In Pintos, the kernel separates commands into an executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+	1: Making sure only essential code is in the kernal is important
+		for efficiency and accessability.
+	2: Kernal issues are much less likely to happen if an issue
+		happens in the shell rather than the kernal
+
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In "lib/user/syscall.h":
+#define PID_INITIALIZATION -2 /* Creates a new pid */
+
+In "process.h":
+struct process_control_block { /*a representation of a process */
+  pid_t pid;  /* pid of the process */
+  const char *cmd_line; /* execution of the process */
+
+  bool is_waiting;    /* process in waiting */
+  bool has_exited;     /* process has exited. */
+  bool is_orphan;     /* process was child but its parent has ended*/
+  int exitcode;				/* code for exit */
+
+  struct thread* parent; /* stores the parent of a thread */
+  struct list_elem elem; /* list of children of a thread */
+
+  struct semaphore wait_sema; /* semaphore for waiting on a child */
+};
+
+struct file_descriptor {
+  int id;						/* thread's id for file */
+  struct file *file; /* file for an id */
+  struct list_elem elem; /* list for file descriptors */
+};
+
+In "thread.h":
+struct thread {
+	...
+	struct process_control_block *pcb /* Threads PCB */
+	struct list children /* List of children */
+	struct list file_descriptors /* list of opened files */
+
+	struct file *executing_file /* file being used */
+	...
+}
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+File descriptors are what a process uses for identifying its opened files. 
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+// READING DATA
+Check if fd is valid, if so use file_read
+If fd is not valid then return error
+
+// WRITING DATA
+Start by checking if fd is STDOUT. If so write to console 300 bytes at a time.
+If fd is not STDOUT, then we get the file and lock it so it can be written to using file_write
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+Wait loops through the thread's children until it finds the passed pid.
+Once found, sema down and wait till child terminates. 
+Remove child and return exit code, once all waited on children are dead then the process terminates.
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+Check virtual pointer for:
+	1. Above the process code segment (0x08048000) see vaddr.h
+	2. Below PHYS_BASE
+	3. not null
+
+These are checked in get_arg and get_arg_pointer,
+if any fail then fail_safely is called and filesys lock is released.
+System exit is called.
+
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+We used a semaphore in a pcp to make sure all start processes have finished.
+This sema downs before returning and upped after completing
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+Error check if child exists.
+If it does, down its semaphore till it exits
+Pcb is freed on exit
+
+If pe ends before C exits, then C is marked as orphan and will be freed prior to 
+termination of the current process's directory
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+It was the easiest to use and was referenced in the squarespace resource presented
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+Advantages:
+simple and quick
+Disadvantages: 
+overly long inputs break it
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+No change implemented
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
