@@ -156,7 +156,7 @@ start_process (void *pcb_pointer)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
   struct thread *t = thread_current();
   struct list children = t->children;
@@ -210,13 +210,12 @@ process_exit (void)
   uint32_t *pd = cur->pagedir;
 
   /* clean up process' file descriptors */
-  struct list file_descriptors = cur->file_descriptors;
   struct list_elem *e;
   struct file_descriptor *descriptor;
 
-  while (!list_empty(&file_descriptors))
+  while (!list_empty(&cur->file_descriptors))
   {
-    e = list_pop_front (&file_descriptors);
+    e = list_pop_front (&cur->file_descriptors);
     descriptor = list_entry(e, struct file_descriptor, elem);
 
     file_close(descriptor->file);
@@ -231,11 +230,10 @@ process_exit (void)
   }
 
   /* clean up any children of this process. */
-  struct list children = cur->children;
   struct process_control_block *pcb;
-  while (!list_empty(&children))
+  while (!list_empty(&cur->children))
   {
-    e = list_pop_front(&children);
+    e = list_pop_front(&cur->children);
     pcb = list_entry(e, struct process_control_block, elem);
 
     if (pcb->has_exited)
