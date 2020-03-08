@@ -32,13 +32,31 @@ https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+/* represents a process in the OS, AKA PCB or Task Control Block */
+struct process_control_block {
+  pid_t pid;  /* pid of the process, same as the thread id since we have a one-to-one relationship */
+  const char *cmd_line; /* the line used to execute this process (includes arguments) */
+
+  struct semaphore start_sema; /* semaphore used to wait until the process has been started. */
+};
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
-	
+	We implemented argument parsing by looking at the program startup details in section 3.5.1 and in the squarespace resource.
+	First we pushed the arguments onto the stack in reverse order, keeping track of each argument's address.
+	Then, we make sure to perform a word alignment to go into the next "block" of instructions.
+	This is done by a bit AND operator that aligns esp to the next block, designated by the c (nearest multiple of 4) in hex.
+	Then, we assign a null (zero) value to our last + 1 argument.
+	Next we push all argument addresses in reverse order, then the address to the pointer to the first argument.
+	Finally, we push the argument count and a fake (or null) return address that is never called.
+
+	avoid overflowing..? We don't expect the user to input enough arguments to cause an overflow in pintos.
+	If we did have to implement overflowing, this would be done by limiting both the length of each argument
+	and the # of arguments to a certain value that would contain less characters than stack space.
 
 ---- RATIONALE ----
 
@@ -55,7 +73,7 @@ https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7
 >> separation.  Identify at least two advantages of the Unix approach.
 
 	1. Modularity. The shell can easily change how commands are separted into executables and arguments
-	2. 
+	2. Less code in the kernel makes it easier to read (and more performant)?
 
 
 			     SYSTEM CALLS
@@ -67,14 +85,63 @@ https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In "lib/user/syscall.h":
+#define PID_INITIALIZATION -2 /* Used to set a pid for a new PCB */
+
+In "process.h":
+/* represents a process in the OS, AKA PCB or Task Control Block */
+struct process_control_block {
+  pid_t pid;  /* pid of the process */
+  const char *cmd_line; /* the line used to execute this process */
+
+  bool is_waiting;    /* whether or not the process is currently waiting */
+  bool has_exited;     /* whether this process has exited. */
+  bool is_orphan;     /* whether this child's parent has been terminated */
+  int exitcode;				/* the code to use in the system call when exiting */
+
+  struct thread* parent; /* used to find a parent's children */
+  struct list_elem elem; /* used in a list on a thread to find its children */
+
+  struct semaphore wait_sema; /* semaphore used to wait until thde children have exited. */
+};
+
+struct file_descriptor {
+  int id;						/* The thread's unique id given to this file */
+  struct file *file; /* the open file given by the id */
+  struct list_elem elem; /* use to hold a list of file_descriptors in a thread */
+};
+
+In "thread.h":
+struct thread {
+	...
+	struct process_control_block *pcb /* The PCB used by this thread. */
+	struct list children /* List of children processes (as PCBs) in this thread */
+	struct list file_descriptors /* a list of opened files (by file_descriptors) */
+
+	struct file *executing_file /* the file this thread/process is reading to execute */
+	...
+}
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+
+file descriptors are unique just within a single process. They are used to open files by
+assigning a new file descriptor (id) to any new open files for the current thread.
+The id is incremented by 1 each time.
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+
+// READING DATA
+
+// WRITING DATA
+First, we check if the fd is STDOUT, if so we write to the console by putting 
+bytes, up to 300 at a time, onto the console buffer using putbuf().
+Otherwise, we get the file attached to the given file descriptor (fd)
+and, acquiring a file systsem lock, we use file_write(...) to write the buffer to the fiel.
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -85,6 +152,14 @@ https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7
 
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+The wait system calls works by looping throuh the currently running thread's children processes
+until it finds a pid that matches the given child_tid, then now that we found the child to wait on,
+We say that child is waiting and, if it hasnt yet exited, we down a semaphore to have this child wait
+until it terminates. Then we remove the child from the thread's children returning the child's exitcode
+and freeing the child's process control block.
+
+A process will terminate once all the children that its waiting on have been terminated.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -100,12 +175,32 @@ https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+We simply check each argument for validity.
+The virtual pointer argument must be:
+	1. Above the process code segment (0x08048000) see vaddr.h
+	2. Below PHYS_BASE
+	3. not null
+
+These are checked using the methods 'get_arg' for getting an argument
+and 'get_arg_pointer' for getting an argument thats a pointer. 
+get_arg checks validity of the location of the stack pointer and get_arg_pointer
+checks validity of the address the pointer is pointing to.
+
+If any of these validity checks fail, we fail safely through the 'fail_safely()' func in
+"syscall.h" There we release the file system lock if its held by the current thread and then
+exit using the system exit call that terminates the currently running process.
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+We use a "start_sema" in a process control block that ensures that exec won't be finished until
+start_process has finished executing. This sema is downed just before returning (provided it
+succeeded loading and allocating pages) from process_exec and upped just before completing
+start_process. 
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -114,16 +209,35 @@ https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+If the child process isnt found or the process is already waiting, we just return -1 to show 
+and error occurred. After C exists, we make sure to down the child's wait semaphore as long as it has
+not exited. We always free the child's pcb once we make sure the child exists.
+
+If P terminates without waiting & before C exists, then we mark C as an orphan during termination
+and make sure to free it before destroying the current process's page directory.
+
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
+It was the simplest and easily explaing in the squarespace resource.
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
+advantage: 
+	simple to understand
+	unique values for each file
+	quick access to an opened file
+disadvantages: 
+	Greater than INT_MAX files opened by 1 thread/process will cause OS failure.
+
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+
+We didn't change it, it's still mapped identically, 1 to 1.
 
 			   SURVEY QUESTIONS
 			   ================
