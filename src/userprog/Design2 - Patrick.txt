@@ -1,0 +1,237 @@
+		           +--------------------------+
+				   |         CIS 520          |
+		           | PROJECT 2: USER PROGRAMS |
+		           |     DESIGN DOCUMENT      |
+		           +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names of your group members.
+
+Patrick Kliesner
+Andrew Fulton
+Austin Smith
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+Helpful Repository: https://github.com/wookayin/pintos/
+https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7b16b7a2ed6/1535507195196/Pintos+Guide
+
+Squarespace Pintos Reference: https://static1.squarespace.com/static/5b18aa0955b02c1de94e4412/t/5b85fad2f950b7b16b7a2ed6/1535507195196/Pintos+Guide
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+/* represents a process in the OS, AKA PCB or Task Control Block */
+struct process_control_block {
+  pid_t pid;  /* pid of the process, same as the thread id since we have a one-to-one relationship */
+  const char *cmd_line; /* the line used to execute this process (includes arguments) */
+  struct semaphore start_sema; /* semaphore used to wait until the process has been started. */
+};
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+Argument passing was implemented by adding arguments to the stack. Then we use word alignment
+to go set of instructions. Once we are done processing arguments we add a null value to after the
+last argument. After this all the arguments are pushed in reverse order, and then the arguments are pushed
+again including a fake return address.
+
+We do not currently implement overflowing the stack page but if we needed to we could limit 
+the amount and size of arguments.
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+strtok_r allows to be called from multiple threads at the same time .
+
+>> A4: In Pintos, the kernel separates commands into an executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+Letting the shell take care of separating the commands helps lighten what the kernal has to do
+which in turn avoids more mistakes at the kernal level. Another advantage would be the shell has
+an easier time separating the commands into names and arguments than the kernal.
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In "lib/user/syscall.h":
+#define PID_INITIALIZATION -2 /* Creates a new pid */
+
+In "process.h":
+struct process_control_block { /*a struct for a process */
+  pid_t pid;  /* pid of the process */
+  const char *cmd_line; /* execution of the process */
+
+  bool is_waiting;    /* for if the process is waiting */
+  bool has_exited;     /* for if the process has exited. */
+  bool is_orphan;     /*  for if the process was child but its parent has died*/
+  int exitcode;				/* code for exit */
+
+  struct thread* parent; /* stores the parent of a thread */
+  struct list_elem elem; /* list of children of a thread */
+
+  struct semaphore wait_sema; /* semaphore for waiting on a child */
+};
+
+struct file_descriptor {
+  int id; /* thread's identifier id for the file */
+  struct file *file; /* the file */
+  struct list_elem elem; /* list for file descriptors */
+};
+
+In "thread.h":
+struct thread {
+	...
+	struct process_control_block *pcb /* Threads PCB used */
+	struct list children /* List of children processes */
+	struct list file_descriptors /* list of opened files */
+	struct file *executing_file /* file being used */
+	...
+}
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+File descriptors are created when a file is opened and are unique for each process. 
+When the file is closed, the file descriptor is also removed.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+// READING DATA
+Check if fd is valid, if so use file_read
+If fd is not valid then return error
+
+// WRITING DATA
+Start by checking if fd is STDOUT. If so write to console 300 bytes at a time.
+If fd is not STDOUT, then we get the file and lock it so it can be written to using file_write
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+After receiving a pid, the wait system process looks through the list of child processes for that
+pid. It then checks to see if the child has finished running. Then wait simply
+returns the exit status of the child and removes the child thread from its list
+of child threads. When the child thread in question finishes, it looks at the parent thread and
+updates the exit status. If the waiting bit is set, the child thread also
+unblocks the parent thread so the parent can now see the exit status and return.
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+We check each argument to make sure it is a valid pointer value. These are checked using the 
+methods 'get_arg' and 'get_arg_pointer'. If any fail then fail_safely is called and filesys 
+lock is released. Then system exit is called.
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+We use a "start_sema" in a process control block that ensures that exec won't be finished until
+start_process has finished executing. This sema is downed just before returning (provided it
+succeeded loading and allocating pages) from process_exec and upped just before completing
+start_process. 
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+If the child process isnt found or the process is already waiting, we just return -1 to show 
+and error occurred. After C exists, we make sure to down the child's wait semaphore as long as it has
+not exited. We always free the child's pcb once we make sure the child exists.
+
+If P terminates without waiting & before C exists, then we mark C as an orphan during termination
+and make sure to free it before destroying the current process's page directory.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+It is the method that was the easiest to implement and described in the squarespace pdf.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+Some advantages are our implementation is simple and quick, but a disadvantage is long inputs break it.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+We did not change it.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
